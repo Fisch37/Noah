@@ -4,15 +4,12 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3i;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.LinkedList;
-import java.util.Optional;
-import java.util.function.Predicate;
+import java.util.*;
 
 // WARNING: BLACK MAGIC AHEAD
-public class Flooding {
+public abstract class FloodFill {
     private final BlockPos center;
     private final Vec3i localCenter;
-    private final Predicate<BlockPos> query;
     private final byte radius;
 
     private final @Nullable Node[][][] area;
@@ -21,19 +18,17 @@ public class Flooding {
     private LinkedList<Vec3i> sources = new LinkedList<>();
     private LinkedList<Vec3i> temp_sources = new LinkedList<>();
 
-    public Flooding(
+    protected FloodFill(
             BlockPos center,
-            Predicate<BlockPos> query,
             byte radius
     ) {
         this.center = center;
-        this.query = query;
         this.radius = radius;
 
         final int dim = 2*radius + 1;
         area = new Node[dim][dim][dim];
         localCenter = new Vec3i(radius, radius, radius);
-        area[radius][radius][radius] = new Node(radius);
+        area[radius][radius][radius] = new Node();
         sources.add(localCenter);
     }
 
@@ -44,18 +39,24 @@ public class Flooding {
                 return Optional.of(localToGlobal(searchResult));
         }
         for (Vec3i pos : sources) {
-            if (testPos(pos))
+            if (matches(localToGlobal(pos)))
                 return Optional.of(localToGlobal(pos));
         }
         return Optional.empty();
     }
+
+    protected abstract boolean matches(BlockPos pos);
+
+    protected abstract void visit(BlockPos pos);
 
     private @Nullable Vec3i step() {
         // Redirection shenanigans
         LinkedList<Vec3i> local_sources = sources;
         sources = temp_sources;
         for (Vec3i pos : local_sources) {
-            if (testPos(pos)) {
+            final BlockPos global = localToGlobal(pos);
+            visit(global);
+            if (matches(global)) {
                 return pos;
             }
             propagateNode(pos);
@@ -73,11 +74,7 @@ public class Flooding {
         area[pos.getX()][pos.getY()][pos.getZ()] = val;
     }
 
-    private boolean testPos(Vec3i pos) {
-        return query.test(localToGlobal(pos));
-    }
-
-    protected BlockPos localToGlobal(Vec3i local) {
+    private BlockPos localToGlobal(Vec3i local) {
         return center.add(local).subtract(localCenter);
     }
 
@@ -92,7 +89,7 @@ public class Flooding {
 
             Node child = get(childPos);
             if (child == null) {
-                child = new Node(node.level - 1);
+                child = new Node();
                 set(childPos, child);
                 sources.add(childPos);
             }
@@ -100,10 +97,8 @@ public class Flooding {
         }
     }
 
-    private record Node(int level, @Nullable Vec3i[] children) {
-        private Node(int level) {
-            this(level, CHILD_DIRECTIONS.clone());
-        }
+    private static final class Node {
+        private final @Nullable Vec3i[] children = CHILD_DIRECTIONS.clone();
 
         private void removeOrigin(byte dirIndex) {
             children[getInverse(dirIndex)] = null;
