@@ -4,7 +4,8 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3i;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.*;
+import java.util.LinkedList;
+import java.util.Optional;
 
 // WARNING: BLACK MAGIC AHEAD
 public abstract class FloodFill {
@@ -28,7 +29,7 @@ public abstract class FloodFill {
         final int dim = 2*radius + 1;
         area = new Node[dim][dim][dim];
         localCenter = new Vec3i(radius, radius, radius);
-        area[radius][radius][radius] = new Node();
+        area[radius][radius][radius] = new Node(false);
         sources.add(localCenter);
     }
 
@@ -49,15 +50,23 @@ public abstract class FloodFill {
 
     protected abstract void visit(BlockPos pos);
 
+    protected boolean filter(BlockPos pos) {
+        return true;
+    }
+
     private @Nullable Vec3i step() {
         // Redirection shenanigans
         LinkedList<Vec3i> local_sources = sources;
         sources = temp_sources;
         for (Vec3i pos : local_sources) {
             final BlockPos global = localToGlobal(pos);
-            visit(global);
-            if (matches(global)) {
-                return pos;
+            Node node = get(pos);
+            assert node != null;
+            if (!node.isDead()) {
+                visit(global);
+                if (matches(global)) {
+                    return pos;
+                }
             }
             propagateNode(pos);
         }
@@ -86,12 +95,15 @@ public abstract class FloodFill {
             Vec3i direction = node.children[b];
             if (direction == null) continue;
             Vec3i childPos = pos.add(direction);
+            BlockPos childGlobal = localToGlobal(childPos);
 
             Node child = get(childPos);
             if (child == null) {
-                child = new Node();
+                child = new Node(node.isDead() || filter(childGlobal));
                 set(childPos, child);
                 sources.add(childPos);
+            } else if (child.isDead()) {
+                 child.resurrect();
             }
             child.removeOrigin(b);
         }
@@ -99,6 +111,19 @@ public abstract class FloodFill {
 
     private static final class Node {
         private final @Nullable Vec3i[] children = CHILD_DIRECTIONS.clone();
+        private boolean dead;
+
+        private Node(boolean dead) {
+            this.dead = dead;
+        }
+
+        private void resurrect() {
+            dead = true;
+        }
+
+        private boolean isDead() {
+            return dead;
+        }
 
         private void removeOrigin(byte dirIndex) {
             children[getInverse(dirIndex)] = null;
